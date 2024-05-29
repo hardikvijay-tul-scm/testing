@@ -1,0 +1,140 @@
+pipeline{
+    agent{
+        label "master"
+    }
+    environment{
+        JOB_BUILD_NO="$BUILD_NUMBER"
+        TARGET_DEPLOYMENT_S3_BUCKET="tul-sp-deployment"
+        ZIP_FILE_NAME="tul-oms-${env.ENVIRONMENT}-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$COMMIT_ID-${env.TARGET_DEPLOYMENT_GROUP_1}.zip"
+    }
+    
+    
+    
+    parameters{
+        string(name: "BRANCH_TAG_NAME",description: "Branch to Deploy")
+        string(name: 'S3_ARTIFACTS_BUCKET', defaultValue: 'tul-sp-artifacts')
+        string(name: 'TARGET_DEPLOYMENT_APP', defaultValue: 'document-qa5')
+        string(name: 'TARGET_DEPLOYMENT_Group_1', defaultValue: 'document-qa5-TG1')
+        string(name: 'TARGET_DEPLOYMENT_Group_2', defaultValue: 'document-qa5-TG2')
+	
+        choice(name: 'ENVIRONMENT', choices: ['QA1', 'QA2','QA3','QA4','QA5','QA6','QA7','QA8','QA9','QA10','QA11'], description: 'Select Environment to Deploy')
+    }
+    stages{
+        
+         /*stage("Record Branch and Enviromnet ") {
+             agent{
+              label "SPNode"
+             }
+            steps {
+
+                  wrap([$class: 'BuildUser']) {
+                sh '''
+    
+                mysql -N -u $MySQLCred_USR -p$MySQLCred_PSW -Bse "use Jenkins_Env_Branch_deployed; UPDATE JenkinsDeploymentHistory SET current_branch_deployed='$BRANCH_TAG_NAME',features_deployed='$Feature_Deployed',started_by='$BUILD_USER',deployment_time='$BUILD_TIMESTAMP' where environment='$ENVIRONMENT';"
+                '''
+               
+                  }
+            }
+        }*/
+        
+        stage("Initialization") {
+            steps {
+                
+                
+                
+                cleanWs()
+                // use name of the patchset as the build name
+               script{
+                 currentBuild.description = "${params.ENVIRONMENT}-${params.BRANCH_TAG_NAME}"
+               }
+            }
+        }
+
+           stage('Document Service Repo Checkout'){
+                steps{
+                    git branch: "${params.BRANCH_TAG_NAME}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/document-service"
+                  
+                   
+                }
+           }
+
+            stage('Configration Code Checkout'){
+                steps{
+                      
+                    
+                     
+                    
+                   build job:"SP_OMS/GitConfigCodePull_NewRepo", parameters: [string(name:"CONFIG_BRANCH", value:  "${env.CONFIG_BRANCH}"), string(name:"CONFIG_REPO", value:"${env.CONFIG_REPO}"), string(name:"ENVIRONMENT", value:"${params.ENVIRONMENT}")]
+                  
+                    
+                }
+            }
+
+
+            
+            
+            stage('Build Document MicroService WebApp'){
+                steps{
+               
+                  sh '''
+                 mvn clean install -DskipTests
+                  '''
+                
+                }
+           }
+             stage('Upload Document MicroService Artifact to s3'){
+                steps{
+               
+              
+                  sh '''
+        
+		chmod +x /ciapp/jenkins/workspace/SP_OMS/GitConfigCodePull_NewRepo/config/devops_scripts/sp-api-services/document_service_deployment/qa5/document_service_s3upload.sh
+                 
+                sh /ciapp/jenkins/workspace/SP_OMS/GitConfigCodePull_NewRepo/config/devops_scripts/sp-api-services/document_service_deployment/qa5/document_service_s3upload.sh $ENVIRONMENT  $S3_ARTIFACTS_BUCKET $ENVIRONMENT $ZIP_FILE_NAME $S3_ARTIFACTS_BUCKET
+                echo "************************"
+                 cd  $WORKSPACE
+                commitID=$(git log --format="%H" -n 1)
+                ZIP_FILE_NAME=${ZIP_FILE_NAME/null/$commitID}
+                echo $ZIP_FILE_NAME > result.txt
+                
+                
+                '''
+                script{
+                    
+                    myVar = readFile('result.txt').trim()
+                }
+             echo "${myVar}"
+               
+                  
+                  
+                
+                }
+           }
+           
+            stage('Deploying on Target Group 1 ') {
+      
+        
+        steps{
+                     build job: "SP_OMS/CodeDeploy_QA_DocumentService", parameters: [string(name: "TARGET_DEPLOYMENT_APP", value: "${env.TARGET_DEPLOYMENT_APP}"), string(name: "TARGET_DEPLOYMENT_GROUP", value: "${env.TARGET_DEPLOYMENT_Group_1}"), string(name: "TARGET_DEPLOYMENT_CONFIG", value: "CodeDeployDefault.OneAtATime"), string(name: "TARGET_DEPLOYMENT_S3_BUCKET", value: "${env.TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: "ZIP_FILE_NAME", value: "${myVar}"), string(name: "S3_ARTIFACTS_BUCKET", value: "${env.S3_ARTIFACTS_BUCKET}"), string(name: "ENVIRONMENT", value: "${params.ENVIRONMENT}"), string(name: "TARGET_DEPLOYMENT_BUCKET_SUFFIX", value: "${params.ENVIRONMENT}"), string(name: "BRANCH_NAME", value: ""), string(name: "JOB_BUILD_NO", value: "${}"), string(name: "COMMIT_ID", value: ""), string(name: "BRANCH_TAG_NAME", value: "${params.BRANCH_TAG_NAME}")]
+
+                }
+    
+          
+           
+        }
+        
+        stage('Deploying on Target Group 2 '){
+             steps{
+                 
+                     
+                     build job: "SP_OMS/CodeDeploy_QA_DocumentService", parameters: [string(name: "TARGET_DEPLOYMENT_APP", value: "${env.TARGET_DEPLOYMENT_APP}"), string(name: "TARGET_DEPLOYMENT_GROUP", value: "${env.TARGET_DEPLOYMENT_Group_2}"), string(name: "TARGET_DEPLOYMENT_CONFIG", value: "CodeDeployDefault.OneAtATime"), string(name: "TARGET_DEPLOYMENT_S3_BUCKET", value: "${env.TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: "ZIP_FILE_NAME", value: "${myVar}"), string(name: "S3_ARTIFACTS_BUCKET", value: "${env.S3_ARTIFACTS_BUCKET}"), string(name: "ENVIRONMENT", value: "${params.ENVIRONMENT}"), string(name: "TARGET_DEPLOYMENT_BUCKET_SUFFIX", value: "${params.ENVIRONMENT}"), string(name: "BRANCH_NAME", value: ""), string(name: "JOB_BUILD_NO", value: "${}"), string(name: "COMMIT_ID", value: ""), string(name: "BRANCH_TAG_NAME", value: "${params.BRANCH_TAG_NAME}")]
+
+                }
+        
+            
+        }
+        
+        
+        
+    }
+}
