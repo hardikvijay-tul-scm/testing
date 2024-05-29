@@ -1,0 +1,96 @@
+pipeline{
+    agent{
+        label "master"
+    }
+
+	parameters{
+        string(name: 'CODE_REPO', defaultValue: 'oms-hybrid-job')
+        string(name: "BRANCH_TAG_NAME", description: "Branch to Deploy")
+        string(name: 'COMMIT_ID', defaultValue: '$GIT_COMMIT')
+        choice(name: 'LOCATION', choices: ['refs/heads','refs/tags'], description: 'if you are using branch then use refs/heads or if you are using tag then use refs/tags')
+        string(name: 'ENVIRONMENT', defaultValue: 'PROD' , description: 'Select Environment to Deploy')
+        string(name: 'EMAIL_RECIPIENTS', description: "Add email addresses with comma separated values")
+    }
+
+    environment{
+
+        APPNAME="oms-hybrid-job"
+        CONFIG_REPO="TE_CONFIG_REPO_FOR_AWS"
+        CONFIG_BRANCH="SPOMS"
+	JOBNAME= "OMS-HybridUtility_PROD"
+        S3_ARTIFACTS_BUCKET="tul-omshybridutility-artifacts"
+        TARGET_DEPLOYMENT_S3_BUCKET="tul-omshybridutility-deployments"
+        TARGET_DEPLOYMENT_BUCKET_SUFFIX="$ENVIRONMENT"
+        TARGET_DEPLOYMENT_CONFIG="CodeDeployDefault.OneAtATime"
+        TARGET_DEPLOYMENT_APP="OMS${env.ENVIRONMENT.toLowerCase()}"
+        TARGET_DEPLOYMENT_GROUP="oms-hybrid-utility-$ENVIRONMENT"
+        JOB_BUILD_NO="$BUILD_NUMBER"
+        ZIP_FILE_NAME="tul-omshybridutility-${env.ENVIRONMENT}-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$GIT_COMMIT-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+	WORKSPC="/ciapp/jenkins/workspace/OMS-HybridUtility_PROD"
+	ZIP_FILE_OMSHYBRIDUTILITY="tul-omshybridutility-${env.ENVIRONMENT}-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$GIT_COMMIT-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+        //ZIP_FILE_DOB="tul-dob-${env.ENVIRONMENT}-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$GIT_COMMIT-${env.TARGET_DEPLOYMENT_GROUP_DOB}.zip"
+    }
+
+    stages{
+		stage('Initialization'){
+			steps{
+				script{
+					currentBuild.description = "${params.ENVIRONMENT}-${params.BRANCH_TAG_NAME}"
+				}
+			}
+		} 
+        stage('Code Repo Checkout'){
+            steps{
+				git branch: "${params.BRANCH_TAG_NAME}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${params.CODE_REPO}.git"
+            }
+        }
+
+        stage('Configration Code Checkout'){
+            steps{
+                script{
+                    build job:"PRODUCTION/GitConfigCodePull_NewRepo", parameters: [string(name:"CONFIG_BRANCH", value:"${env.CONFIG_BRANCH}"), string(name:"CONFIG_REPO", value:"${env.CONFIG_REPO}"), string(name:"ENVIRONMENT", value:"${params.ENVIRONMENT}")]
+                }
+            }
+        }
+
+		stage('OMSHybridUtility Build Code'){
+            steps{
+                sh'''
+                    cp -rf /ciapp/jenkins/workspace/PRODUCTION/GitConfigCodePull_NewRepo/config/oms/$ENVIRONMENT/omshybridjob/Properties/application.properties /ciapp/jenkins/workspace/OMS-HybridUtility_PROD/src/main/resources/
+                    mvn clean install
+                    cd /ciapp/jenkins/workspace/OMS-HybridUtility_PROD/
+                    mkdir -p /ciapp/jenkins/workspace/OMS-HybridUtility_PROD/build/libs/PROD 
+		    mkdir -p /ciapp/HYBRID_Operations_PROD/PROD
+		    cd /ciapp/jenkins/workspace/OMS-HybridUtility_PROD/
+                    cp /ciapp/jenkins/workspace/OMS-HybridUtility_PROD/target/HotcAwbStatusPullUtility-0.0.1-SNAPSHOT.jar /ciapp/jenkins/workspace/OMS-HybridUtility_PROD/build/libs/PROD
+                    mv build/libs/PROD/HotcAwbStatusPullUtility-0.0.1-SNAPSHOT.jar build/libs/PROD/HotcAwbStatusPullUtility.jar
+                    
+                '''            
+            }
+        }
+
+		stage('Upload build artifact to S3'){
+            steps{
+
+                sh "/ciapp/CICD-Scripts/CICD-BackendScripts/OMS-HybridUtility_s3_upload_newrepo_PROD_2023.sh $ENVIRONMENT $ZIP_FILE_OMSHYBRIDUTILITY $S3_ARTIFACTS_BUCKET"
+            }    
+        }
+
+        
+        stage('CodeDeploy'){
+            steps{
+              script{                  
+                
+                build job: "PRODUCTION/CodeDeploy_PROD", parameters: [string(name: "TARGET_DEPLOYMENT_APP", value: "${env.TARGET_DEPLOYMENT_APP}"), string(name: "TARGET_DEPLOYMENT_GROUP", value: "${env.TARGET_DEPLOYMENT_GROUP}"), string(name: "TARGET_DEPLOYMENT_CONFIG", value: "CodeDeployDefault.OneAtATime"), string(name: "TARGET_DEPLOYMENT_S3_BUCKET", value: "${env.TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: "ZIP_FILE_NAME", value: "${env.ZIP_FILE_OMSHYBRIDUTILITY}"), string(name: "S3_ARTIFACTS_BUCKET", value: "${env.S3_ARTIFACTS_BUCKET}"), string(name: "ENVIRONMENT", value: "${params.ENVIRONMENT}"), string(name: "TARGET_DEPLOYMENT_BUCKET_SUFFIX", value: "${params.ENVIRONMENT}"), string(name: "JOB_BUILD_NO", value: "${env.JOB_BUILD_NO}"), string(name: "COMMIT_ID", value: "${params.COMMIT_ID}"), string(name: "BRANCH_TAG_NAME", value: "${params.BRANCH_TAG_NAME}")]               
+               
+               }
+            }
+        } 
+
+        stage('Clean Work Space') {
+            steps{
+              cleanWs()
+            }
+        }
+     }
+}  
