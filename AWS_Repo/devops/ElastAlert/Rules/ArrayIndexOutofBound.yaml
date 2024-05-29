@@ -1,0 +1,100 @@
+# Alert when the rate of events exceeds a threshold
+
+# (Optional)
+# Elasticsearch host
+# es_host: elasticsearch.example.com
+
+# (Optional)
+# Elasticsearch port
+# es_port: 9200
+
+# (OptionaL) Connect with SSL to Elasticsearch
+#use_ssl: True
+
+# (Optional) basic-auth username and password for Elasticsearch
+#es_username: someusername
+#es_password: somepassword
+
+# (Required)
+# Rule name, must be unique
+name: ArrayIndexOutOfBoundsException
+
+# (Required)
+# Type of alert.
+# the frequency rule type alerts when num_events events occur with timeframe time
+type: frequency
+
+# (Required)
+# Index to search, wildcard supported
+index: commerce-logs*
+
+# (Required, frequency specific)
+# Alert when this many documents matching the query occur within a timeframe
+num_events: 50
+
+# (Required, frequency specific)
+# num_events must occur within this amount of time to trigger an alert
+timeframe:
+  minutes: 15
+
+realert:
+  hours: 1 
+
+# (Required)
+# A list of Elasticsearch filters used for find events
+# These filters are joined with AND and nested in a filtered query
+# For more info: https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl.html
+filter:
+- query:
+    query_string:
+      query: "log-level: ERROR AND message: \"java.lang.ArrayIndexOutOfBoundsException\""
+
+use_count_query: true
+# (Required)
+# The alert is use when a match is found
+alert:
+- "email"
+
+# (required, email specific)
+# a list of email addresses to send alerts to
+email:
+- "anethrakere@tataunistore.com"
+- "dmukherjee_t@tataunistore.com"
+- "ksingh@tataunistore.com"
+- "akumar7@tataunistore.com"
+
+email_format: "html"
+alert_text_type: alert_text_only
+alert_subject: "Exception Containing java.lang.ArrayIndexOutOfBoundsException are more than threshold at {0}."
+alert_subject_args:
+- '@timestamp'
+alert_text: |
+        <html>
+        <body>
+           <p style="text-align:left;">Hi Team,</p>
+           <p>Exception count are more than threshold {1} for <b>java.lang.ArrayIndexOutOfBoundsException</b> in hybris logs in last {0} minutes.</p>
+           <p>PFB table for more details</p>
+           <table style="font-family:arial, sans-serif;border-collapse:collapse;">
+                <tr>
+                 <th style="border:1px solid;text-align:left;">Threshold count</th>
+                 <th style="border:1px solid;text-align:left;">Threshold window duration</th>
+                 <th style="border:1px solid;text-align:left;">Timestamp(UTC)</th>
+                </tr>
+                <tr>
+                 <td style="border:1px solid;text-align:left;"> {1} </td>
+                 <td style="border:1px solid;text-align:left;"> {0} </td>
+                 <td style="border:1px solid;text-align:left;"> {2} </td>
+                </tr>
+           </table>
+           <br/>
+           <p>please click on this <a href="http://tulloggingprod.tataunistore.com:5601/app/discover#/?_g=(filters:!(),refreshInterval:(pause:!t,value:0),time:(from:now-15m,to:now))&_a=(columns:!(),filters:!(),index:'24bdf100-ebf7-11ec-a361-41ce44cde3eb',interval:auto,query:(language:kuery,query:'log-level:%20ERROR%20AND%20message:%20%22java.lang.ArrayIndexOutOfBoundsException%22'),sort:!(!('@timestamp',desc)))">link</a> to view the dashboard </p>
+           <br/> 
+           <p style="text-align:left;">Regards,</p>
+           <p style="text-align:left;">DevOps Team</p><br/>
+        </body>
+        </html>
+
+alert_text_args:
+- timeframe
+- num_events
+- "@timestamp"
