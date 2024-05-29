@@ -1,0 +1,97 @@
+pipeline{
+    agent{
+        label "master"
+    }
+    environment{
+
+        APPNAME="sp"
+        //APPNAME="SP${env.ENVIRONMENT.toLowerCase()}"
+        CONFIG_REPO="TE_CONFIG_REPO_FOR_AWS"
+        CONFIG_BRANCH="master"
+        //CODE_REPO="SELLER_PORTAL_INTEGRA_BACKEND"
+        //LOCATION="refs/heads"
+        BUILD_XML_PATH="$WORKSPACE/build.xml"
+        //ANT_PATH="/ciapp/apache-ant-1.9.4/bin/ant"
+        S3_ARTIFACTS_BUCKET="tul-sp-integra-be-artifacts"
+        TARGET_DEPLOYMENT_S3_BUCKET="tul-sp-integra-be-deployment"
+        TARGET_DEPLOYMENT_BUCKET_SUFFIX="PROD"
+        TARGET_DEPLOYMENT_APP="SPprod"
+        TARGET_DEPLOYMENT_CONFIG="CodeDeployDefault.OneAtATime"
+        TARGET_DEPLOYMENT_GROUP="SPAssistBEDG-prod"
+        TARGET_DEPLOYMENT_GROUP_ASG="SPIntegraBEDG-prod"
+        TARGET_DEPLOYMENT_GROUP_ASSIST="SPAssistBEDG-prod"
+        JOB_BUILD_NO="$BUILD_NUMBER"
+        ZIP_FILE_NAME="tul-sp-integra-BE-PROD-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$COMMIT_ID-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+        //ZIP_FILE_ASSIST="tul-sp-integra-assist-BE-PROD-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$COMMIT_ID-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+        ZIP_FILE_ASG="tul-sp-integra-asg-BE-PROD-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$COMMIT_ID-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+        //MySQLCred= credentials('MySQLCred')
+        }
+    parameters{
+        string(name: "BRANCH_TAG_NAME",  description: "Branch to Deploy")
+        string(name: 'CODE_REPO', defaultValue: 'SELLER_PORTAL_INTEGRA_BACKEND')
+        choice(name: 'LOCATION', choices: ['refs/heads','refs/tags'], description: 'if you are using branch then use refs/heads or if you are using tag then use refs/tags')
+        string(name: 'COMMIT_ID', defaultValue: '$GIT_COMMIT')
+        //string(name: 'ZIP_FILE_NAME', defaultValue: 'tul-sp-${env.ENVIRONMENT}-${env.JOB_BUILD_NO}-${params.BRANCH_TAG_NAME}-$COMMIT_ID-${env.TARGET_DEPLOYMENT_GROUP}.zip')
+        string(name: 'ENVIRONMENT', defaultValue: 'PROD' , description: 'Select Environment to Deploy')
+        string(name: "EMAIL_RECIPIENTS", description: "Enter the Reqired Mail ID")
+    }
+    stages{
+                       
+        stage("Initialization") {
+            steps {
+                
+                // use name of the patchset as the build name
+               script{
+                 currentBuild.description = "${params.ENVIRONMENT}-${params.BRANCH_TAG_NAME}"
+               }
+            }
+        }
+
+        stage('Repo Checkout'){
+            parallel{
+               stage('Code Repo'){
+                  steps{ 
+                    git branch: "${params.BRANCH_TAG_NAME}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${CODE_REPO}.git"
+                  }
+               }
+
+               stage('Config repo'){
+                  steps{
+                       echo "${params.ZIP_FILE_NAME}"
+                       echo "${params.ENVIRONMENT}"
+                       build job:"PRODUCTION/GitConfigCodePull_NewRepo", parameters: [string(name:"CONFIG_BRANCH", value:  "${env.CONFIG_BRANCH}"), string(name:"CONFIG_REPO", value:"${env.CONFIG_REPO}"), string(name:"ENVIRONMENT", value:"${params.ENVIRONMENT}")]
+                  }
+               }
+            }
+        }
+
+        stage('Build the artifact'){
+                steps{
+                     sh'''                   
+                     export JAVA_HOME="/usr/java/jdk1.8.0_45"
+                     ./gradlew build 
+                     '''
+                     
+                }
+        }
+
+        stage('Uploading to S3'){
+                steps{
+                   sh "/ciapp/CICD-Scripts/CICD-BackendScripts/sp_integra_BE_s3_upload_New.sh $APPNAME $ENVIRONMENT $ZIP_FILE_ASG $S3_ARTIFACTS_BUCKET"
+                }
+        }
+
+        stage('Deploying ASG War'){
+                steps{
+                     build job: "PRODUCTION/CodeDeploy_PROD", parameters: [string(name: "TARGET_DEPLOYMENT_APP", value: "${env.TARGET_DEPLOYMENT_APP}"), string(name: "TARGET_DEPLOYMENT_GROUP", value: "${env.TARGET_DEPLOYMENT_GROUP_ASG}"), string(name: "TARGET_DEPLOYMENT_CONFIG", value: "${env.TARGET_DEPLOYMENT_CONFIG}"), string(name: "TARGET_DEPLOYMENT_S3_BUCKET", value: "${env.TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: "ZIP_FILE_NAME", value: "${env.ZIP_FILE_ASG}"), string(name: "S3_ARTIFACTS_BUCKET", value: "${env.S3_ARTIFACTS_BUCKET}"), string(name: "ENVIRONMENT", value: "${params.ENVIRONMENT}"), string(name: "TARGET_DEPLOYMENT_BUCKET_SUFFIX", value: "${env.TARGET_DEPLOYMENT_BUCKET_SUFFIX}"), string(name: "BRANCH_NAME", value: "${env.BRANCH_NAME}"), string(name: "JOB_BUILD_NO", value: "${env.JOB_BUILD_NO}"), string(name: "COMMIT_ID", value: "${env.COMMIT_ID}"), string(name: "BRANCH_TAG_NAME", value: "${params.BRANCH_TAG_NAME}")]
+                }
+        }
+
+        stage('Clean Work Space') {
+                steps{
+                 cleanWs()
+                }
+        }     
+       
+    }
+}
