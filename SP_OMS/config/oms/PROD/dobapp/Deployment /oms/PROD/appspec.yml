@@ -1,0 +1,20 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /microapp/microservices/etl_services/
+permissions:
+  - object: /
+    pattern: "**"
+    owner: ciadmin
+    group: ciadmin
+hooks:
+  BeforeInstall:
+    - location: etlRemove.sh
+      timeout: 3000
+  AfterInstall:
+    - location: etlShutdown.sh
+      timeout: 3000
+  ApplicationStart:
+    - location: etlStartup.sh
+      timeout: 3000
