@@ -1,0 +1,24 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /dob_codedeploy/
+permissions:
+  - object: /
+    pattern: "**"
+    owner: ciadmin
+    group: ciadmin
+hooks:
+  BeforeInstall:
+    - location: CD-Remove_Files.sh
+      timeout: 5000
+  AfterInstall:
+    - location: CD-Stop_Oms_Server.sh
+      timeout: 5000
+    - location: CD-Copy_Files.sh
+      timeout: 5000
+    - location: CD-Change_properties.sh
+      timeout: 5000
+  ApplicationStart:
+    - location: CD-Start_Oms_Server.sh
+      timeout: 5000
