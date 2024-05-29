@@ -1,0 +1,101 @@
+pipeline{
+    agent{
+        label "master"
+    }
+
+	parameters{
+        string(name: "CODE_REPO", defaultValue: "MSAuth", description: "code repository")
+        string(name: "BRANCH_TAG_NAME",description: "Branch to Deploy")
+        choice(name: 'LOCATION', choices: ['refs/heads', 'refs/tags'], description: 'Choose Location')
+	    choice(name: 'ENVIRONMENT', choices: [  'QA5'], description: 'Provide the Environment')
+        string(name: "EMAIL_RECIPIENTS", defaultValue: "", description: "Add email addresses with comma separated values")
+    }
+
+    environment{
+	    APPNAME = "MSAuth"
+        WORKING_DIR_HOME = "MSAuth"
+        S3_ARTIFACTS_BUCKET = "tul-devops-spoms/MSAuth-Artifacts"
+        COMMIT_ID = "$GIT_COMMIT"
+	    TARGET_DEPLOYMENT_GROUP = "MSAuth_$ENVIRONMENT"
+	    TARGET_DEPLOYMENT_APP = "OMS${params.ENVIRONMENT.toLowerCase()}"
+	    JOB_BUILD_NO = "$BUILD_NUMBER"
+        CONFIG_REPO = "TE_CONFIG_REPO_FOR_AWS"
+	    CONFIG_BRANCH = "syamsankard-AB-SCM-patch-1"
+        TARGET_DEPLOYMENT_S3_BUCKET = "tul-devops-spoms"
+	    JOBNAME = "${JOB_NAME}"
+        WORKSPACE="/ciapp/jenkins/workspace/${env.JOBNAME}"
+	    TARGET_DEPLOYMENT_BUCKET_SUFFIX = "${params.ENVIRONMENT}"
+	    TARGET_DEPLOYMENT_CONFIG = "CodeDeployDefault.OneAtATime"
+        ZIP_FILE_MSAuth = "tul-MSAuth-${params.ENVIRONMENT}-${env.JOB_BUILD_NO}-${params.BRANCH_TAG_NAME}-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+	    CONFIG_WORKSPACE = "/ciapp/jenkins/workspace/GitConfigCodePull_NewRepo"
+	    BUILDNAME = "${params.ENVIRONMENT}_${BRANCH_TAG_INFO}"
+	    ZIP_FILE_NAME = "${env.ZIP_FILE_MSAuth}"
+        BUILD_USER = "${currentBuild.getBuildCauses()[0].shortDescription} / ${currentBuild.getBuildCauses()[0].userId}"
+    }
+
+    stages{
+        
+		stage('Initialization'){
+            steps{
+                script{
+                    currentBuild.description = "${params.ENVIRONMENT}-${params.BRANCH_TAG_NAME}"
+                } 
+            }
+        }
+        
+        stage('Code Repo Checkout'){
+            steps{
+		git branch: "${params.BRANCH_TAG_NAME}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${params.CODE_REPO}.git"
+            }
+        }
+        
+        stage('Config Repo Checkout'){
+            steps{
+                dir('CONFIG_REPO'){
+                    git branch: "${env.CONFIG_BRANCH}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${env.CONFIG_REPO}.git"
+                }
+            }
+        }
+        
+        stage('Create build artifactory file'){
+            steps{
+                sh '''
+                java -version
+                mvn clean install -DskipTests
+                mkdir -p build/libs/
+                cp target/*.jar build/libs/
+		cd build/libs
+                mv -f ms-auth-*.jar MSAuth.jar
+                '''
+                
+            }
+        }
+        
+        stage('Uploading artifact to S3 bucket'){
+            steps{
+		sh '''
+                #sh CONFIG_REPO/config/devops_scripts/rls_deployment/RLS_s3_upload_newrepo.sh ${ENVIRONMENT} ${ZIP_FILE_ReverseLogisticsServiceability} ${S3_ARTIFACTS_BUCKET}
+                sh /ciapp/CICD-Scripts/CICD-BackendScripts/MSAuth-s3upload.sh
+
+                '''
+            }    
+        }
+        
+        stage('CodeDeploy'){
+            steps{
+              script{
+                    build job: 'SP_OMS/CodeDeploy_QA', parameters: [string(name: 'TARGET_DEPLOYMENT_APP', value: "${TARGET_DEPLOYMENT_APP}"), string(name: 'TARGET_DEPLOYMENT_GROUP', value: "${TARGET_DEPLOYMENT_GROUP}"), string(name: 'TARGET_DEPLOYMENT_CONFIG', value: "${TARGET_DEPLOYMENT_CONFIG}"), string(name: 'TARGET_DEPLOYMENT_S3_BUCKET', value: "${TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: 'TARGET_DEPLOYMENT_BUCKET_SUFFIX', value: "${TARGET_DEPLOYMENT_BUCKET_SUFFIX}"), string(name: 'ENVIRONMENT', value: "${ENVIRONMENT}"), string(name: 'S3_ARTIFACTS_BUCKET', value: "${S3_ARTIFACTS_BUCKET}"), string(name: 'ZIP_FILE_MSAuth', value: "${ZIP_FILE_MSAuth}"), string(name: 'ZIP_FILE_NAME', value: "${ZIP_FILE_NAME}")] 
+               }
+            }
+        } 
+	
+        stage('Clean Work Space') {
+            steps{
+              cleanWs()
+            }
+        }
+	
+    }
+
+    
+}
