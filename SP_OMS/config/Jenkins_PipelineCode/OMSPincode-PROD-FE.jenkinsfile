@@ -1,0 +1,106 @@
+pipeline{
+    agent{
+        label "Build_Slave"
+    }
+
+    parameters{
+        string(name: "CODE_REPO", defaultValue: "SAP_MICROSERVICES_REPO", description: "Provide Code repo name")
+        string(name: "BRANCH_TAG_NAME", description: "Branch name")
+        choice(name: "Location", choices: ['refs/heads, refs/tags'], description: "Change to refs/tag while using tag")
+        string(name: "ENVIRONMENT" , defaultValue: "PROD", description: "Provide Environment")
+        string(name: "CONFIG_REPO", defaultValue: "TE_CONFIG_REPO_FOR_AWS", description: "Provide Config repo name")
+        string(name: "CONFIG_BRANCH", defaultValue: "pc-mini-revamp", description : "Provide Config branch name")
+        string(name: "EMAIL_RECIPIENTS", defaultValue: "tuldevopsteam@tataunistore.com")
+    }
+
+    environment{
+        APPNAME = "pincodeServiceability2.0"
+        //PINCODE_BUILD_DIRECTORY = "/ciapp/Temp-PINCODE-Code"
+        S3_ARTIFACTS_BUCKET = "tul-pincode-artifacts"
+        TARGET_DEPLOYMENT_S3_BUCKET = "tul-pincode-deployments"
+        TARGET_DEPLOYMENT_BUCKET_SUFFIX = "${params.ENVIRONMENT}"
+        TARGET_DEPLOYMENT_CONFIG = "CodeDeployDefault.OneAtATime"
+        TARGET_DEPLOYMENT_APP = "OMSprod"
+        TARGET_DEPLOYMENT_GROUP = "OMSPincodeV3-FrontendDG"
+        JOB_BUILD_NO = "${BUILD_NUMBER}"
+        COMMIT_ID = "${GIT_COMMIT}"
+        JOBNAME = "${JOB_NAME}"
+        ZIP_Pincode2_Frontend = "tul-pincode2-frontend-${params.ENVIRONMENT}-${JOB_BUILD_NO}-${BRANCH_TAG_NAME}-${COMMIT_ID}-${TARGET_DEPLOYMENT_GROUP}.zip"
+        SH_REPO = "TE_CONFIG_REPO_FOR_SP_OMS"
+    	SH_BRANCH = "master"
+    }
+
+     stages{
+        stage('Initialization'){
+            steps{
+                script{
+                    currentBuild.description = "${params.ENVIRONMENT}-${params.BRANCH_TAG_NAME}"
+                }
+            }
+        }
+        stage('Repo_checkout'){
+            parallel{
+                stage('Code_Repo_Checkout'){
+                    steps{
+                        git branch: "${params.BRANCH_TAG_NAME}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${params.CODE_REPO}.git"
+                    }
+                }
+
+                stage('Config_Repo_Checkout'){
+                    steps{
+                        dir('AWS'){
+                            git branch: "${params.CONFIG_BRANCH}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${params.CONFIG_REPO}.git"
+                        }
+                    }
+                }
+
+                stage('Shell_script_repo_checkout'){
+                    steps{
+                        dir('SP_OMS'){
+                            git branch: "${env.SH_BRANCH}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${env.SH_REPO}.git"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build_Pincode_Artifact'){
+            steps{
+                sh'''
+                cd ${WORKSPACE}/PincodeServiceability/src/main/resources/
+                rm -rf application.properties log4j.properties
+                cd ${WORKSPACE}/PincodeServiceability/src/main/webapp/WEB-INF/
+                rm -rf hybrisigniteadaptor-cache-client.xml
+                cd ${WORKSPACE}/AWS/config/$APPNAME/$ENVIRONMENT/Frontend_Deployment/
+                cp application.properties log4j.properties ${WORKSPACE}/PincodeServiceability/src/main/resources/
+                cp hybrisigniteadaptor-cache-client.xml ${WORKSPACE}/PincodeServiceability/src/main/webapp/WEB-INF/
+                cd ${WORKSPACE}/PincodeServiceability/
+                /ciapp/apache-maven-3.3.3/bin/mvn clean install
+                '''
+            }
+        }
+        
+        stage('Frontend_artifact_upload'){
+            steps{
+                sh'''
+                chmod +x SP_OMS/config/devops_scripts/pincode_deployment/pincode2_Frontend_s3_prod.sh
+		        sh SP_OMS/config/devops_scripts/pincode_deployment/pincode2_Frontend_s3_prod.sh ${ENVIRONMENT} ${ZIP_Pincode2_Frontend} ${S3_ARTIFACTS_BUCKET}
+                '''
+            }
+        }
+
+        stage('Frontend_Deployment'){
+            steps{
+                script{
+                    build job: 'PRODUCTION/Pincode_Frontend_V3', parameters: [string(name: 'TARGET_DEPLOYMENT_APP', value: "${TARGET_DEPLOYMENT_APP}"), string(name: 'TARGET_DEPLOYMENT_GROUP', value: "${TARGET_DEPLOYMENT_GROUP}"), string(name: 'TARGET_DEPLOYMENT_CONFIG', value: "${TARGET_DEPLOYMENT_CONFIG}"), string(name: 'TARGET_DEPLOYMENT_S3_BUCKET', value: "${TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: 'TARGET_DEPLOYMENT_BUCKET_SUFFIX', value: "${TARGET_DEPLOYMENT_BUCKET_SUFFIX}"),string(name: 'ZIP_FILE_NAME', value: "${ZIP_Pincode2_Frontend}"),  string(name: 'S3_ARTIFACTS_BUCKET', value: "${S3_ARTIFACTS_BUCKET}"), string(name: 'ENVIRONMENT', value: "${ENVIRONMENT}")] 
+                }
+            }
+        }
+
+        stage('Clean Work Space') {
+            steps{
+              cleanWs()
+            }
+        }
+    }
+}
