@@ -1,0 +1,80 @@
+apiVersion: v1
+data:
+  alertmanager.yml: |
+    global: 
+      resolve_timeout: 1m
+    receivers:
+    - name: default-receiver
+      email_configs:
+      - to: 'tuldevopsteam@tataunistore.com, tatacliqmonitoring@tataunistore.com'
+        send_resolved: false
+        from: tuldevopsteam@tataunistore.com
+        smarthost: email-smtp.ap-south-1.amazonaws.com:25
+        require_tls: true
+        auth_username: 'AKIAQPFGA6JMHMAUPN6L'
+        auth_password: 'BBdfJFrexMP0g8X5ws9Ik9cfZt2ue6Li0f0no6idHuHe'
+    - name: OMS-emailer
+      email_configs:
+      - to: 'hvijay@tataunistore.com, ssankar_t@tataunistore.com, hzambre_t@tataunistore.com, SCM_SRE@tataunistore.com, tuldevopsteam@tataunistore.com'
+        send_resolved: false
+        from: tuldevopsteam@tataunistore.com
+        smarthost: email-smtp.ap-south-1.amazonaws.com:25
+        require_tls: true
+        auth_username: 'AKIAQPFGA6JMHMAUPN6L'
+        auth_password: 'BBdfJFrexMP0g8X5ws9Ik9cfZt2ue6Li0f0no6idHuHe'
+    - name: Beaute-emailer
+      email_configs:
+      - to: 'tuldevopsteam@tataunistore.com, beautyallalerts@tataunistore.com'
+        send_resolved: false
+        from: tuldevopsteam@tataunistore.com
+        smarthost: email-smtp.ap-south-1.amazonaws.com:25
+        require_tls: true
+        auth_username: 'AKIAQPFGA6JMHMAUPN6L'
+        auth_password: 'BBdfJFrexMP0g8X5ws9Ik9cfZt2ue6Li0f0no6idHuHe'
+    - name: centraleks-emailer
+      email_configs:
+      - to: 'sredlapalli_t@tataunistore.com, nsingh2_t@tataunistore.com, omankame_t@tataunistore.com, ssabnis@tataunistore.com, mt-eng@tataunistore.com'
+        send_resolved: false
+        from: tuldevopsteam@tataunistore.com
+        smarthost: email-smtp.ap-south-1.amazonaws.com:25
+        require_tls: true
+        auth_username: 'AKIAQPFGA6JMHMAUPN6L'
+        auth_password: 'BBdfJFrexMP0g8X5ws9Ik9cfZt2ue6Li0f0no6idHuHe'
+    route:
+      group_interval: 30s
+      group_wait: 1m
+      receiver: default-receiver
+      repeat_interval: 1h
+      group_by: [application]
+      routes:     
+      - receiver: 'default-receiver'
+        repeat_interval: 24h
+        matchers:
+        - Alert=~"ssl_expiry"      
+      - receiver: 'OMS-emailer'
+        repeat_interval: 1h
+        matchers:
+        - application=~"OMSApp-prod|OMS-DOB-prod|OMS-Download-Service-PROD|OMSMicroservice-prod|PC-prodschemanodeNifi|Pincode|Pincode2.0-Frontend-Graviton|Pincode-Backend-Graviton|PC-ProdSchemaNode|SP-BATCH-REPORT|SP-CRON-CLUSTER1|SP-CRON-CLUSTER2|SP-CRON-CLUSTER3|SPIntegra|SP-INTERP|SP-SELLERZONE|SP-SELLERZONEAPI|SP-SELLERZONEERP|SPOMS-TataCliq|Ignite Graviton nodes"
+      - receiver: 'centraleks-emailer'
+        repeat_interval: 30m
+        matchers:
+        - env=~"centraleks"
+      - receiver: 'Beaute-emailer'
+        repeat_interval: 30m
+        matchers:
+        - application=~"beaute"
+      - receiver: 'default-receiver'
+        repeat_interval: 1h
+    templates:
+    - /etc/alertmanager/*.tmpl
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2023-04-24T17:12:34Z"
+  labels:
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/version: v0.25.0
+    helm.sh/chart: alertmanager-0.24.1
+  name: prometheus-alertmanager
+  namespace: monitoring
