@@ -1,0 +1,1189 @@
+apiVersion: v1
+data:
+  alerting_rules.yml: |
+    groups:
+    - name: URL Status
+      rules:
+      - alert: ssl_expiry
+        expr: probe_ssl_earliest_cert_expiry{ignore_alert_ssl!="yes"} - time() < 86400*30
+        for: 3m
+        labels:
+          severity: warning
+          Alert: ssl_expiry
+        annotations:
+          summary: "SSL certificate for {{ $labels.instance }} is about to expire"
+          description: "SSL certificate for {{ $labels.instance }} will expire soon, within 30 days or less"
+      - alert: http_status_code_not_200
+        expr: probe_http_status_code{ignore_alert!="yes"} >= 500 and probe_http_status_code{ignore_alert!="yes"} <= 599
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP status code for {{ $labels.instance }} is not 200"
+          description: "HTTP status code for {{ $labels.instance }} is {{ $value }} instead of 200"
+      - alert: http_status_code_not_found
+        expr: probe_http_status_code{ignore_alert!="yes",app!="comm"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP status code for {{ $labels.instance }} is not found"
+          description: "HTTP status code for {{ $labels.instance }} is not found"
+      - alert: http_status_code_not_found_comm
+        expr: probe_http_status_code{ignore_alert!="yes",app="comm"} == 0
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP status code for {{ $labels.instance }} is not found"
+          description: "HTTP status code for {{ $labels.instance }} is not found"
+      - alert: ignite_status_not_true
+        expr: probe_http_content_length{application="Ignite Graviton nodes"} != 68
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ignite response for {{ $labels.instance }} is not TRUE"
+          description: "Ignite response for {{ $labels.instance }} is not TRUE"
+
+    - name: prod-centraleks alerts
+      rules:
+      - alert: KubernetesNodeReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 10m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: Kubernetes Node ready (instance {{ $labels.instance }})
+          description: "Node {{ $labels.node }} has been unready for a long time\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesMemoryPressure
+        expr: kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: Kubernetes memory pressure (instance {{ $labels.instance }})
+          description: "{{ $labels.node }} has MemoryPressure condition\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesDiskPressure
+        expr: kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: Kubernetes disk pressure (instance {{ $labels.instance }})
+          description: "{{ $labels.node }} has DiskPressure condition\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesOutOfCapacity
+        expr: sum by (node) ((kube_pod_status_phase{phase="Running"} == 1) + on(uid) group_left(node) (0 * kube_pod_info{pod_template_hash=""})) / sum by (node) (kube_node_status_allocatable{resource="pods"}) * 100 > 90
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Kubernetes out of capacity (instance {{ $labels.instance }})
+          description: "{{ $labels.node }} is out of capacity\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesContainerOomKiller
+        expr: (kube_pod_container_status_restarts_total - kube_pod_container_status_restarts_total offset 10m >= 1) and ignoring (reason) min_over_time(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[10m]) == 1
+        for: 0m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Kubernetes container oom killer (instance {{ $labels.instance }})
+          description: "Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has been OOMKilled {{ $value }} times in the last 10 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesPersistentvolumeclaimPending
+        expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Kubernetes PersistentVolumeClaim pending (instance {{ $labels.instance }})
+          description: "PersistentVolumeClaim {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is pending\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesVolumeOutOfDiskSpace
+        expr: kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes * 100 < 10
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Kubernetes Volume out of disk space (instance {{ $labels.instance }})
+          description: "Volume is almost full (< 10% left)\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesPersistentvolumeError
+        expr: kube_persistentvolume_status_phase{phase=~"Failed|Pending", job="kube-state-metrics"} > 0
+        for: 0m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: Kubernetes PersistentVolume error (instance {{ $labels.instance }})
+          description: "Persistent volume is in bad state\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesHpaScalingAbility
+        expr: kube_horizontalpodautoscaler_status_condition{status="false", condition="AbleToScale"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Kubernetes HPA scaling ability (instance {{ $labels.instance }})
+          description: "Pod is unable to scale\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesHpaScaleCapability
+        expr: kube_horizontalpodautoscaler_status_desired_replicas >= kube_horizontalpodautoscaler_spec_max_replicas
+        for: 2m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: Kubernetes HPA scale capability (instance {{ $labels.instance }})
+          description: "The maximum number of desired Pods has been hit\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesHPAScalingThreshold
+        expr: kube_horizontalpodautoscaler_status_current_replicas/kube_horizontalpodautoscaler_spec_max_replicas*100 >80
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: "{{$labels.instance}} Kubernetes HPA Scaling Threshold"
+          description: "{{$labels.instance}} HPA Scaling Threshold is above 80% (current value is {{ $value }})"
+      - alert: KubernetesPodNotHealthy
+        expr: min_over_time(sum by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown|Failed"})[15m:1m]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: Kubernetes Pod not healthy (instance {{ $labels.instance }})
+          description: "Pod has been in a non-ready state for longer than 15 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesPodCrashLooping
+        expr: increase(kube_pod_container_status_restarts_total[1m]) > 3
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Kubernetes pod crash looping (instance {{ $labels.instance }})
+          description: "Pod {{ $labels.pod }} is crash looping\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+      - alert: KubernetesCPUOvercommit
+        expr: |
+          sum(namespace_name:kube_pod_container_resource_requests_cpu_cores:sum)
+            /
+          sum(node:node_num_cpu:sum)
+            >          (count(node:node_num_cpu:sum)-1) / count(node:node_num_cpu:sum)
+        for: 5m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          message: Cluster has overcommitted CPU resource requests for Pods and cannot tolerate node failure.
+      - alert: KubernetesNodeCPUUsage-Warning
+        expr: (100 - (avg by (instance) (irate(node_cpu{name="node-exporter",mode="idle"}[5m])) * 100)) > 80
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: "{{$labels.instance}}: High CPU usage detected"
+          description: "{{$labels.instance}} CPU usage is above 80% (current value is {{ $value }})"
+      - alert: KubernetesNodeCPUUsage-Critical
+        expr: (100 - (avg by (instance) (irate(node_cpu{name="node-exporter",mode="idle"}[5m])) * 100)) > 90
+        for: 2m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "{{$labels.instance}}: High CPU usage detected"
+          description: "{{$labels.instance}} CPU usage is above 90% (current value is {{ $value }})"
+      - alert: KubernetesNodeMemoryUsage-Warning
+        expr: ((node_memory_MemTotal-node_memory_MemAvailable)/(node_memory_MemTotal)*100) > 80
+        for: 2m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: "{{$labels.instance}} High memory usage detected"
+          description: "{{$labels.instance}} Memory usage is above 80% (current value is {{ $value }})"
+      - alert: KubernetesNodeMemoryUsage-Critical
+        expr: ((node_memory_MemTotal-node_memory_MemAvailable)/(node_memory_MemTotal)*100) > 90
+        for: 2m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "{{$labels.instance}} High memory usage detected"
+          description: "{{$labels.instance}} Memory usage is above 90% (current value is {{ $value }})"
+      - alert: KubernetesNodeDiskRunningFull-Warning
+        expr: |
+          (node:node_filesystem_usage: > 0.80) and (predict_linear(node:node_filesystem_avail:[6h], 3600 * 24) < 0)
+        for: 30m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          message: Device {{ $labels.device }} of node-exporter {{ $labels.namespace}}/{{ $labels.pod }} will be full within the next 24 hours.
+      - alert: KubernetesNodeDiskRunningFull-Critical
+        expr: |
+          (node:node_filesystem_usage: > 0.90) and (predict_linear(node:node_filesystem_avail:[6h], 3600 * 24) < 0)
+        for: 30m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          message: Device {{ $labels.device }} of node-exporter {{ $labels.namespace}}/{{ $labels.pod }} will be full within the next 24 hours.
+      - alert: KubernetesPodContainerRestart
+        expr: rate(kube_pod_container_status_restarts_total[1m]) * 60 >= 1
+        for: 0s
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "Container {{ $labels.container }} in Pod {{$labels.namespace}}/{{$labels.pod}} restarting once or more than once during last 1 minute."
+          description: "Pod {{$labels.namespace}}/{{$labels.pod}} restarting once or more than once during last 1 minute."
+      - alert: KubernetesPodContainerCpuUsage
+        expr: (sum(irate(container_cpu_usage_seconds_total{pod!=""}[2m])) by (pod) / (sum(container_spec_cpu_quota{pod!=""}/100000) by (pod)) * 100 ) > 85
+        for: 3m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Pod Container CPU usage (instance {{ $labels.instance }})
+          description: "Pod Container CPU usage is above 85%\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"      
+      - alert: KubernetesPodMemoryUsage
+        expr: (sum (container_memory_working_set_bytes{pod!=""}) by (pod)/ sum(container_spec_memory_limit_bytes{pod!=""}) by (pod) * 100) > 85 and (sum(container_spec_memory_limit_bytes{pod!=""}) by (pod) ) != 0
+        for: 3m
+        labels:
+          severity: warning
+          env: centraleks
+        annotations:
+          summary: Pod Container Memory usage (pod {{ $labels.pod }})
+          description: "Pod Container Memory usage is above 90%\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+    - name: Martech Elastic Alerts
+      rules:      
+      - alert: ElasticsearchClusterHealth
+        expr: elasticsearch_cluster_health_status{color="red"} == 1
+        for: 3m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "Elasticsearch cluster health is critical."
+          description: "Elasticsearch cluster health is critical and in a red state."
+      - alert: NodeUnavailable of Elasticsearch
+        expr: |
+          elasticsearch_nodes_available < elasticsearch_nodes_total
+        for: 5m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "Elasticsearch Node Unavailable"
+          description: "One or more Elasticsearch nodes are unavailable."
+      - alert: HighJVMUsage Elasticsearch
+        expr: |
+          sum(elasticsearch_jvm_memory_used_bytes) / sum(elasticsearch_jvm_memory_max_bytes) * 100 > 85
+        for: 3m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "High JVM memory usage in Elasticsearch"
+          description: "JVM memory usage is above 85% in Elasticsearch cluster."
+      - alert: ElasticSearch Index Unassigned Shards
+        expr: es_index_unassigned_shards > 0          
+        for: 30m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "Unassigned shards on index {{$labels.index}} in {{$labels.cluster}}. "
+          description: "Unassigned shards on {{$labels.index}} at {{$labels.cluster}}"
+      - alert: Elasticsearch CPU Critical
+        expr: es_cpu_percentage > 90          
+        for: 5m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "{{$labels.instance}} reports critical cpu usage. "
+          description: "Critical CPU usage on {{$labels.instance}}"
+      - alert: ElasticSearchIndexIsThrootled
+        expr: es_indexng_isthrottled > 0          
+        for: 10m
+        labels:
+          severity: critical
+          env: centraleks
+        annotations:
+          summary: "Index {{$labels.index}} throttled for more than 10 minutes"
+          description: "Index {{$labels.index}} is throttled for more than 10minutes. Some documents can be missing from returned results."  
+
+  alerts: |
+    {}
+  allow-snippet-annotations: "false"
+  prometheus.yml: |
+    global:
+      evaluation_interval: 30s
+      scrape_interval: 30s
+      scrape_timeout: 10s
+    rule_files:
+    - /etc/config/recording_rules.yml
+    - /etc/config/alerting_rules.yml
+    - /etc/config/rules
+    - /etc/config/alerts
+    scrape_configs:
+    - job_name: prometheus
+      static_configs:
+      - targets:
+        - localhost:9090
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-apiservers
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: default;kubernetes;https
+        source_labels:
+        - __meta_kubernetes_namespace
+        - __meta_kubernetes_service_name
+        - __meta_kubernetes_endpoint_port_name
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-nodes
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - replacement: kubernetes.default.svc:443
+        target_label: __address__
+      - regex: (.+)
+        replacement: /api/v1/nodes/$1/proxy/metrics
+        source_labels:
+        - __meta_kubernetes_node_name
+        target_label: __metrics_path__
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-nodes-cadvisor
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - replacement: kubernetes.default.svc:443
+        target_label: __address__
+      - regex: (.+)
+        replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+        source_labels:
+        - __meta_kubernetes_node_name
+        target_label: __metrics_path__
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+    - honor_labels: true
+      job_name: kubernetes-service-endpoints
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape
+      - action: drop
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (.+?)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_service_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_service_name
+        target_label: service
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: node
+    - honor_labels: true
+      job_name: kubernetes-service-endpoints-slow
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (.+?)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_service_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_service_name
+        target_label: service
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: node
+      scrape_interval: 5m
+      scrape_timeout: 30s
+    - honor_labels: true
+      job_name: prometheus-pushgateway
+      kubernetes_sd_configs:
+      - role: service
+      relabel_configs:
+      - action: keep
+        regex: pushgateway
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_probe
+    - honor_labels: true
+      job_name: kubernetes-services
+      kubernetes_sd_configs:
+      - role: service
+      metrics_path: /probe
+      params:
+        module:
+        - http_2xx
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_probe
+      - source_labels:
+        - __address__
+        target_label: __param_target
+      - replacement: blackbox
+        target_label: __address__
+      - source_labels:
+        - __param_target
+        target_label: instance
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - source_labels:
+        - __meta_kubernetes_service_name
+        target_label: service
+    - honor_labels: true
+      job_name: kubernetes-pods
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape
+      - action: drop
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (.+?)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_name
+        target_label: pod
+      - action: drop
+        regex: Pending|Succeeded|Failed|Completed
+        source_labels:
+        - __meta_kubernetes_pod_phase
+    - honor_labels: true
+      job_name: kubernetes-pods-slow
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (.+?)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_name
+        target_label: pod
+      - action: drop
+        regex: Pending|Succeeded|Failed|Completed
+        source_labels:
+        - __meta_kubernetes_pod_phase
+      scrape_interval: 5m
+      scrape_timeout: 30s
+    - job_name: 'PROD_Service_Discovery'
+      metrics_path: '/metrics'
+      ec2_sd_configs:
+        - region: ap-south-1
+          port: 9100
+      relabel_configs:
+      - source_labels: [__meta_ec2_tag_Environment]
+        replacement: '${1}'
+        target_label: job
+      - source_labels: [__meta_ec2_tag_Environment]
+        replacement: '${1}'
+        target_label: env
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}'
+        target_label: instance
+      - source_labels: [__meta_ec2_tag_Name]
+        replacement: '${1}'
+        target_label: Name
+    - job_name: 'blackbox'
+      metrics_path: /probe
+      scrape_interval: 120s
+      scrape_timeout: 10s 
+      params:
+        module: [http_2xx]  # Look for a HTTP 200 response.
+      static_configs:
+        - targets:
+          - http://10.23.22.57:9000/actuator/health
+          - http://10.23.23.240:9000/actuator/health
+          labels:
+            environment: prod
+            application: Tata Digital SSO
+        - targets:
+          - http://10.23.18.69:8080/products/actuator/health
+          - http://10.23.28.12:8080/products/actuator/health
+          - http://10.23.20.37:8080/products/actuator/health
+          - http://10.23.31.54:8080/products/actuator/health
+          labels:
+            environment: prod
+            application: Search MS
+        - targets:
+          - http://10.23.18.88:8983/solr/
+          - http://10.23.17.197:8983/solr/       
+          - http://10.23.74.37:8983/solr/
+          - http://10.23.20.243:8983/solr/ 
+          - http://10.23.67.43:8983/solr/
+          - http://10.23.76.145:8983/solr/
+          - http://10.23.16.132:8983/solr/
+          - http://10.23.79.108:8983/solr/
+          - http://10.23.73.185:8983/solr/
+          - http://10.23.72.10:8983/solr/#/
+          labels:
+            environment: prod
+            application: Solr
+        - targets:
+          - http://10.23.64.247:8080/PincodeService/
+          - http://10.23.77.245:8080/PincodeService/
+          - http://10.23.74.195:8080/PincodeService/ 
+          - https://pincodev2.tatacliq.com/PincodeService/
+          labels:
+            environment: prod
+            application: Pincode
+        - targets:
+          - http://10.23.66.133:9200/_cat/indices?v
+          - http://10.23.65.195:9200/_cat/indices?v
+          - http://10.23.22.140:9200/_cat/indices?v
+          - http://10.23.76.189:9200/_cat/indices?v
+          - http://10.23.21.133:9200/_cat/indices?v
+          - http://10.23.25.66:9200/_cat/indices?v
+          - http://10.23.27.102:9200/_cat/indices?v
+          - http://10.23.27.102:9200/_cat/indices?v
+          labels:
+            environment: prod
+            application: Elastic
+        - targets:
+          - http://10.23.30.77:8080/marketplacemicroscervices/
+          - http://10.23.19.30:8080/marketplacemicroscervices/
+          labels:
+            environment: prod
+            application: Microservice
+        - targets:
+          - http://10.23.75.220:8080/ 
+          - http://10.23.23.4:8080/ 
+          labels:
+            environment: prod
+            application: Microservice
+        - targets:
+          - http://10.23.64.162:8080/recommendationengine/
+          - http://10.23.25.122:8080/recommendationengine/
+          - https://www.tatacliq.com/recommendationengine/
+          - https://www.tatacliq.com/recommendationengine/actuator/health
+          labels:
+            environment: prod
+            application: Recommendation-Microservice-Prod
+        - targets:
+          - http://10.23.29.113:8080/actuator/health
+          - http://10.23.30.229:8080/actuator/health
+          - http://10.23.23.35:8080/actuator/health
+          - http://10.23.23.35:8080/actuator/health 
+          labels:
+            environment: prod
+            application: Tata Digital Loyality
+        - targets:
+          - http://10.23.19.96:8080/ignite?cmd=currentstate
+          - http://10.23.22.132:8080/ignite?cmd=currentstate
+          - http://10.23.22.217:8080/ignite?cmd=currentstate 
+          labels:
+            environment: prod
+            application: Ignite Graviton nodes
+        - targets:
+          - https://10.23.17.44:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.26.142:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.29.22:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.28.84:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.23.222:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.79.2:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.68.126:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.79.75:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.69.76:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.64.51:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.66.58:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.75.228:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.68.94:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.74.67:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.29.41:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.21.70:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.73.127:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.27.170:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.31.17:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.31.170:9002/marketplacewebservices/healthcheck.jsp
+
+          labels:
+            environment: prod
+            application: Comm nodes
+            app: comm
+        - targets:
+          - http://10.23.17.44:9001/hac/monitoring/healthcheck
+          - http://10.23.26.142:9001/hac/monitoring/healthcheck
+          - http://10.23.29.22:9001/hac/monitoring/healthcheck
+          - http://10.23.28.84:9001/hac/monitoring/healthcheck
+          - http://10.23.23.222:9001/hac/monitoring/healthcheck
+          - http://10.23.79.2:9001/hac/monitoring/healthcheck
+          - http://10.23.68.126:9001/hac/monitoring/healthcheck
+          - http://10.23.79.75:9001/hac/monitoring/healthcheck
+          - http://10.23.69.76:9001/hac/monitoring/healthcheck
+          - http://10.23.64.51:9001/hac/monitoring/healthcheck
+          - http://10.23.66.58:9001/hac/monitoring/healthcheck
+          - http://10.23.75.228:9001/hac/monitoring/healthcheck
+          - http://10.23.68.94:9001/hac/monitoring/healthcheck
+          - http://10.23.74.67:9001/hac/monitoring/healthcheck
+          - http://10.23.29.41:9001/hac/monitoring/healthcheck
+          - http://10.23.21.70:9001/hac/monitoring/healthcheck
+          - http://10.23.73.127:9001/hac/monitoring/healthcheck
+          - http://10.23.27.170:9001/hac/monitoring/healthcheck
+          - http://10.23.31.17:9001/hac/monitoring/healthcheck
+          - http://10.23.31.170:9001/hac/monitoring/healthcheck
+          
+          labels:
+            environment: prod
+            application: Comm nodes 9001
+            app: comm
+        - targets:
+          - https://10.23.17.219:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.17.40:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.72.85:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.76.222:9002/marketplacewebservices/healthcheck.jsp
+          labels:
+            environment: prod
+            application: Comm admin
+            app: comm
+        - targets:
+          - http://admin.tatacliq.com/hac/monitoring/healthcheck
+          - http://10.23.17.219:9001/hac/monitoring/healthcheck
+          - http://10.23.17.40:9001/hac/monitoring/healthcheck
+          - http://10.23.72.85:9001/hac/monitoring/healthcheck
+          - http://10.23.76.222:9001/hac/monitoring/healthcheck
+          labels:
+            environment: prod
+            application: Comm admin 9001
+            app: comm
+        - targets:
+          - https://10.23.22.188:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.25.87:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.21.143:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.29.96:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.74.57:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.77.192:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.65.87:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.71.168:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.67.106:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.17.212:9002/marketplacewebservices/healthcheck.jsp
+          - https://10.23.25.34:9002/marketplacewebservices/healthcheck.jsp
+          labels:
+            environment: prod
+            application: Comm backend
+            app: comm
+        - targets:
+          - http://10.23.22.188:9001/hac/monitoring/healthcheck
+          - http://10.23.25.87:9001/hac/monitoring/healthcheck
+          - http://10.23.21.143:9001/hac/monitoring/healthcheck
+          - http://10.23.29.96:9001/hac/monitoring/healthcheck
+          - http://10.23.74.57:9001/hac/monitoring/healthcheck
+          - http://10.23.77.192:9001/hac/monitoring/healthcheck
+          - http://10.23.65.87:9001/hac/monitoring/healthcheck
+          - http://10.23.71.168:9001/hac/monitoring/healthcheck
+          - http://10.23.67.106:9001/hac/monitoring/healthcheck
+          - http://10.23.17.212:9001/hac/monitoring/healthcheck
+          - http://10.23.25.34:9001/hac/monitoring/healthcheck    
+          labels:
+            environment: prod
+            application: Comm backend 9001
+            app: comm
+        - targets:
+          - https://10.23.17.44:9002/hac/monitoring/cluster/data
+          - https://10.23.26.142:9002/hac/monitoring/cluster/data
+          - https://10.23.29.22:9002/hac/monitoring/cluster/data
+          - https://10.23.28.84:9002/hac/monitoring/cluster/data
+          - https://10.23.23.222:9002/hac/monitoring/cluster/data
+          - https://10.23.79.2:9002/hac/monitoring/cluster/data
+          - https://10.23.68.126:9002/hac/monitoring/cluster/data
+          - https://10.23.79.75:9002/hac/monitoring/cluster/data
+          - https://10.23.69.76:9002/hac/monitoring/cluster/data
+          - https://10.23.64.51:9002/hac/monitoring/cluster/data
+          - https://10.23.66.58:9002/hac/monitoring/cluster/data
+          - https://10.23.75.228:9002/hac/monitoring/cluster/data
+          - https://10.23.68.94:9002/hac/monitoring/cluster/data
+          - https://10.23.74.67:9002/hac/monitoring/cluster/data
+          labels:
+            environment: prod
+            application: Comm nodes HAC
+            app: comm
+        - targets:
+          - https://10.23.17.219:9002/hac/monitoring/cluster/data
+          - https://10.23.17.40:9002/hac/monitoring/cluster/data
+          - https://10.23.72.85:9002/hac/monitoring/cluster/data
+          - https://10.23.76.222:9002/hac/monitoring/cluster/data 
+          labels:
+            environment: prod
+            application: Comm admin HAC
+            app: comm
+        - targets:
+          - https://10.23.22.188:9002/hac/monitoring/cluster/data
+          - https://10.23.25.87:9002/hac/monitoring/cluster/data
+          - https://10.23.21.143:9002/hac/monitoring/cluster/data
+          - https://10.23.29.96:9002/hac/monitoring/cluster/data
+          - https://10.23.74.57:9002/hac/monitoring/cluster/data
+          - https://10.23.77.192:9002/hac/monitoring/cluster/data
+          - https://10.23.65.87:9002/hac/monitoring/cluster/data
+          - https://10.23.71.168:9002/hac/monitoring/cluster/data
+          - https://10.23.67.106:9002/hac/monitoring/cluster/data
+          - https://10.23.17.212:9002/hac/monitoring/cluster/data
+          - https://10.23.25.34:9002/hac/monitoring/cluster/data 
+          labels:
+            environment: prod
+            application: Comm backend HAC
+            app: comm
+        - targets:
+          - https://www.tatacliq.com/
+          - https://luxury.tatacliq.com/
+          labels:
+            environment: prod
+            application: TataCliq
+        - targets:
+          - https://palette.tatacliq.com/api/health
+          - https://beautealpha.tatacliq.com/
+          - http://10.23.22.15:3000/api/health
+          - http://10.23.18.209:3000/api/health
+          - http://10.23.65.77:3000/api/health
+          labels:
+            environment: prod
+            application: beaute      
+        - targets:
+          - https://sellerapp.tatacliq.com
+          - https://sellerinterp.tatacliq.com
+          - https://sellerzone.tatacliq.com
+          - https://sellerzoneapi.tatacliq.com
+          - https://sellerzonebatch.tatacliq.com
+          - https://sellerzoneerp.tatacliq.com
+          - https://sellerzonereport.tatacliq.com
+          - https://gstsp.tatacliq.com
+          - https://integra.tatacliq.com
+          labels:
+            environment: prod
+            application: SPOMS-TataCliq
+        - targets:
+          - http://10.23.72.217:3000/
+          - http://10.23.67.173:3000/
+          - http://10.23.25.206:3000/
+          - http://10.23.29.196:3000/
+          - http://10.23.16.22:3000/
+          labels:
+            environment: prod
+            application: PWA Desktop
+        - targets:
+          - http://10.23.72.95:3000/
+          - http://10.23.69.62:3000/
+          - http://10.23.79.36:3000/
+          - http://10.23.30.160:3000/
+          - http://10.23.17.175:3000/
+          - http://10.23.26.188:3000/
+          labels:
+            environment: prod
+            application: PWA M-Site
+        - targets:
+          - http://10.23.24.173:3000/
+          - http://10.23.68.237:3000/
+          labels:
+            environment: prod
+            application: Luxury Desktop
+        - targets:
+          - http://10.23.30.89:3000/
+          - http://10.23.72.66:3000/
+          labels:
+            environment: prod
+            application: Luxury MSite
+        - targets:
+          - https://10.23.65.12:9002/login.jsp
+          - https://10.23.67.145:9002/login.jsp
+          - https://10.23.26.30:9002/login.jsp
+          labels:
+            environment: prod
+            application: PCM Nodes
+            ignore_alert_ssl: yes
+        - targets:
+          - https://pcmadmin.tatacliq.com/
+          labels:
+            environment: prod
+            application: PCM Admin
+        - targets:
+          - http://10.23.137.155:8888/
+          labels:
+            environment: prod
+            application: Druid
+        - targets:
+          - http://10.23.139.187:3000/login
+          labels:
+            environment: prod
+            application: Grafana
+        - targets:
+          - http://10.23.32.165:3552/
+          labels:
+            environment: prod
+            application: Qlik-replicate
+        - targets:
+          - http://10.23.29.47:8080/mplratingreview/
+          labels:
+            environment: prod
+            application: RNR-MS
+        - targets:
+          - http://10.23.29.239:8080/tdneucoinsmessage/actuator/health
+          labels:
+            environment: prod
+            application: TD-Neucoins
+        - targets:
+          - http://10.23.30.67:8080/oms-ext-web/init-app-web/console/main
+          - http://10.23.28.200:8080/oms-ext-web/init-app-web/console/main
+          - http://10.23.29.161:8080/oms-ext-web/init-app-web/console/main
+          - http://10.23.71.31:8080/oms-ext-web/init-app-web/console/main
+          - http://10.23.64.26:8080/oms-ext-web/init-app-web/console/main
+          - http://10.23.65.33:8080/oms-ext-web/init-app-web/console/main
+          - http://10.23.73.157:8080/oms-ext-web/init-app-web/console/main
+          - https://oms.tatacliq.com/oms-ext-web/init-app-web/console/main
+          labels:
+            environment: prod
+            application: OMSApp-prod
+        - targets:
+          - http://10.23.68.104:8080/dataonboarding-ext-web/init-app-web/console/main
+          - https://omsdob.tatacliq.com/dataonboarding-ext-web/init-app-web/console/main
+          labels:
+            environment: prod
+            application: OMSDob-prod
+        - targets:
+          - http://10.23.18.214:9096/reverserviceability/actuator/health
+          - http://10.23.27.173:9096/reverserviceability/actuator/health
+          labels:
+            environment: prod
+            application: OMSMicroservice-prod
+        - targets:
+          - http://10.23.26.215:8082/nifi/
+          - http://10.23.67.125:8082/nifi/
+          labels:
+            environment: prod
+            application: PC-prodschemanodeNifi
+        - targets:
+          - http://10.23.64.247:8080/PincodeService/
+          - http://10.23.77.245:8080/PincodeService/
+          - http://10.23.74.195:8080/PincodeService/
+          labels:
+            environment: prod
+            application: Pincode2.0-Frontend-Graviton
+        - targets:
+          - http://10.23.76.41:8080/PincodeService/
+          - http://10.23.66.146:8080/PincodeService/
+          - http://10.23.65.185:8080/PincodeService/
+          labels:
+            environment: prod
+            application: Pincode-Backend-Graviton
+        - targets:
+          - http://10.23.69.58:8081/subjects
+          - http://10.23.17.23:8081/subjects
+          labels:
+            environment: prod
+            application: PC-ProdSchemaNode 
+        - targets:
+          - http://10.23.70.215:8080/faces/commons/userLogin.jsp
+          - http://10.23.67.15:8080/faces/commons/userLogin.jsp
+          labels:
+            environment: prod
+            application: SP-BATCH-REPORT
+        - targets:
+          - http://10.23.76.136:8080/faces/commons/userLogin.jsp
+          - http://10.23.74.21:8080/faces/commons/userLogin.jsp
+          - https://spcroncluster1.tatacliq.com/health
+          labels:
+            environment: prod
+            application: SP-CRON-CLUSTER1
+        - targets:
+          - http://10.23.71.74:8080/faces/commons/userLogin.jsp
+          - http://10.23.66.35:8080/faces/commons/userLogin.jsp
+          - https://spcroncluster2.tatacliq.com/health
+          labels:
+            environment: prod
+            application: SP-CRON-CLUSTER2 
+        - targets:
+          - http://10.23.66.112:8080/faces/commons/userLogin.jsp
+          - http://10.23.74.189:8080/faces/commons/userLogin.jsp
+          - https://spcroncluster3.tatacliq.com/health
+          labels:
+            environment: prod
+            application: SP-CRON-CLUSTER3
+        - targets:
+          - https://omsdownload.tatacliq.com/health-check
+          - http://10.23.16.89:8080/health-check
+          labels:
+            environment: prod
+            application: OMSDownload-prod
+        - targets:
+          - https://integra.tatacliq.com/
+          labels:
+            environment: prod
+            application: SPIntegra
+        - targets:
+          - http://10.23.75.190:8080/faces/commons/userLogin.jsp
+          - http://10.23.67.98:8080/faces/commons/userLogin.jsp
+          - http://10.23.74.150:8080/faces/commons/userLogin.jsp
+          - http://10.23.72.142:8080/faces/commons/userLogin.jsp
+          - http://10.23.70.153:8080/faces/commons/userLogin.jsp
+          - https://intapp.tatacliq.com/test
+          - https://intbatch.tatacliq.com/test
+          labels:
+            environment: prod
+            application: SP-INTERP
+        - targets:
+          - http://10.23.72.203:8080/faces/commons/userLogin.jsp
+          - http://10.23.66.118:8080/faces/commons/userLogin.jsp
+          labels:
+            environment: prod
+            application: SP-SELLERZONE
+        - targets:
+          - http://10.23.72.5:8080/faces/commons/userLogin.jsp
+          - http://10.23.69.193:8080/faces/commons/userLogin.jsp
+          - http://10.23.72.24:8080/faces/commons/userLogin.jsp
+          - http://10.23.69.230:8080/faces/commons/userLogin.jsp
+          - http://10.23.69.33:8080/faces/commons/userLogin.jsp
+          labels:
+            environment: prod
+            application: SP-SELLERZONEAPI
+        - targets:
+          - http://10.23.78.193:8080/faces/commons/userLogin.jsp
+          - http://10.23.75.96:8080/faces/commons/userLogin.jsp
+          labels:
+            environment: prod
+            application: SP-SELLERZONEERP
+      relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    - job_name: Cassandra Prod
+      static_configs:
+      - targets: ['10.23.101.230:7070','10.23.99.231:7070','10.23.97.1:7070']
+    - job_name: 'elasticsearch'
+      scrape_interval: 45s
+      scrape_timeout:  30s
+      metrics_path: "/metrics"
+      static_configs:
+      - targets: 
+        - elastic-exporter-prometheus-elasticsearch-exporter.monitoring.svc.cluster.local:9108 
+    - job_name: 'MT-MP-RPS'
+      scrape_interval: 10s
+      scrape_timeout: 5s
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_app_kubernetes_io_name]
+          action: keep
+          regex: mt-merchandising-personalization
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          target_label: __address__
+          regex: ([^:]+)(?::\d+)?;(\d+)
+        - source_labels: [__meta_kubernetes_pod_container_name]
+          action: keep
+          regex: mt-merchandising-personalization          
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod  
+    - job_name: 'MT-CDP-RPS'
+      scrape_interval: 10s
+      scrape_timeout: 5s
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_app_kubernetes_io_name]
+          action: keep
+          regex: mt-cdp
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          target_label: __address__
+          regex: ([^:]+)(?::\d+)?;(\d+)
+        - source_labels: [__meta_kubernetes_pod_container_name]
+          action: keep
+          regex: mt-cdp          
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod     
+    alerting:
+      alertmanagers:
+      - kubernetes_sd_configs:
+          - role: pod
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace]
+          regex: monitoring
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          regex: prometheus
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          regex: alertmanager
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          regex: "9093"
+          action: keep
+  recording_rules.yml: |
+    {}
+  rules: |
+    {}
+kind: ConfigMap
+metadata:
+  annotations:
+    meta.helm.sh/release-name: prometheus
+    meta.helm.sh/release-namespace: monitoring
+  labels:
+    app: prometheus
+    app.kubernetes.io/managed-by: Helm
+    chart: prometheus-19.5.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+  namespace: monitoring
