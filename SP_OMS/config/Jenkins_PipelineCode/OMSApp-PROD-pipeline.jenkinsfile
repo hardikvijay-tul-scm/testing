@@ -1,0 +1,126 @@
+pipeline{
+    agent{
+        label "master"
+    }
+
+    parameters{
+        string(name: "BRANCH_TAG_NAME",defaultValue: '', description: "Branch to Deploy")
+        string(name: 'COMMIT_ID', defaultValue: '$GIT_COMMIT')
+        string(name: 'CODE_REPO', defaultValue: 'SAP_OMS_REPO')
+        choice(name: 'LOCATION', choices: ['refs/heads','refs/tags'], description: 'if you are using branch then use refs/heads or if you are using tag then use refs/tags')
+        //string(name: 'ZIP_FILE_NAME', defaultValue: 'tul-sp-${env.ENVIRONMENT}-${env.JOB_BUILD_NO}-${params.BRANCH_TAG_NAME}-$COMMIT_ID-${env.TARGET_DEPLOYMENT_GROUP}.zip')
+        string(name: 'ENVIRONMENT', defaultValue: 'PROD' , description: 'Select Environment to Deploy')
+        //choice(name: 'DependencyCheck', choices: ['True', 'False'], description: "Please select true if you want Dependency check ")
+        string(name: "EMAIL_RECIPIENTS", description: "Enter the Reqired Mail ID")
+    }
+
+    environment{
+	    OMSTEMPDIR="/ciapp/Temp-OMS-Code/TE_OMS_REPO"
+        APPNAME="oms"
+        CONFIG_REPO="TE_CONFIG_REPO_FOR_AWS"
+        CONFIG_BRANCH="master"
+        //CODE_REPO="SAP_OMS_REPO"
+        //LOCATION="refs/heads"
+	    JOBNAME= "OMS-$ENVIRONMENT"
+        S3_ARTIFACTS_BUCKET="tul-oms-artifacts"
+        TARGET_DEPLOYMENT_S3_BUCKET="tul-oms-deployment"
+        TARGET_DEPLOYMENT_BUCKET_SUFFIX="$ENVIRONMENT"
+        TARGET_DEPLOYMENT_CONFIG="CodeDeployDefault.AllAtOnce"
+        TARGET_DEPLOYMENT_APP="OMSprod"
+        TARGET_DEPLOYMENT_GROUP="OMSAppDG-prod"
+        JOB_BUILD_NO="$BUILD_NUMBER"
+	    TARGET_DEPLOYMENT_GROUP_OMS="OMSAppDG-prod"
+        ZIP_FILE_NAME="tul-oms-$ENVIRONMENT-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$GIT_COMMIT-${env.TARGET_DEPLOYMENT_GROUP}.zip"
+	    WORKSPC="/ciapp/jenkins/workspace/${JOB_NAME}"
+	    ZIP_FILE_OMS="tul-oms-$ENVIRONMENT-$JOB_BUILD_NO-$BRANCH_TAG_NAME-$GIT_COMMIT-${env.TARGET_DEPLOYMENT_GROUP_OMS}.zip"
+                      
+    }
+    
+    stages{
+                      
+           stage("Initialization") {
+               steps {
+                   // use name of the patchset as the build name
+                   script{
+                    currentBuild.description = "${params.ENVIRONMENT}-${params.BRANCH_TAG_NAME}"
+                   }
+                }
+           }
+
+           stage('OMS Code Repo Checkout'){
+                steps{
+                        git branch: "${params.BRANCH_TAG_NAME}", credentialsId: '255d5f87-8f1c-429b-82b3-f9334d361aae' , url: "https://github.com/tcs-chennai/${CODE_REPO}.git"
+                	
+			}
+           }
+
+            stage('OMS Configration Code Checkout'){
+                steps{
+                    echo "${params.ZIP_FILE_NAME}"
+                    echo "${params.ENVIRONMENT}"
+                   build job:"PRODUCTION/GitConfigCodePull_NewRepo", parameters: [string(name:"CONFIG_BRANCH", value:  "${env.CONFIG_BRANCH}"), string(name:"CONFIG_REPO", value:"${env.CONFIG_REPO}"), string(name:"ENVIRONMENT", value:"${params.ENVIRONMENT}")]   
+                }
+            }
+            
+            stage('OMS DOB CopyCode'){
+                steps{
+          	        sh'''
+                    echo "OMS TEMP DIR------->"
+                    echo ${OMSTEMPDIR};
+                    rm -rf ${OMSTEMPDIR}/*
+                    cp -rf ${WORKSPC}/* ${OMSTEMPDIR}
+                    '''
+                }  
+            }
+            
+            stage('OMS DOB Copy Config Files'){
+                steps{
+                   //sh "sh /ciapp/CICD-Scripts/CICD-BackendScripts/copyconfig_oms_prod.sh ${ENVIRONMENT} ${APPNAME}"
+                   //sh "sh /ciapp/jenkins/workspace/PRODUCTION/GitConfigCodePull/CICD-BackendScripts/SPOMS_Scripts/PROD/OMSApp/Pipeline/test.sh ${ENVIRONMENT} ${APPNAME}"
+                   sh'''
+                   mkdir -p /ciapp/Temp-OMS-Code/Config/oms/$ENVIRONMENT
+                   cp -rf /ciapp/jenkins/workspace/PRODUCTION/GitConfigCodePull_NewRepo/config/oms/$ENVIRONMENT/* /ciapp/Temp-OMS-Code/Config/oms/$ENVIRONMENT
+                   '''
+                }
+            }  
+            
+            stage('OMSApp Build Code'){
+                steps{
+                script {
+                    sh """
+                    java -version
+                    export JAVA_HOME="/usr/java/jdk1.8.0_45"
+                    cd ${env.OMSTEMPDIR}
+                    chown -R ciadmin:ciadmin dataonboarding-ext/ oms551/ 
+                    su ciadmin -c 'sh /ciapp/CICD-Scripts/CICD-BackendScripts/new_build_omsapp_code.sh'
+                    """                
+                }
+               }
+           } 
+           stage('Upload to S3'){
+		       steps{
+		           /*
+		            sh'''
+		            chmod +x /ciapp/jenkins/workspace/PRODUCTION/GitConfigCodePull_NewRepo/CICD-BackendScripts/SPOMS_Scripts/PROD/OMSApp/Pipeline/new_omsapp_s3_upload_newrepo.sh
+			        sh /ciapp/jenkins/workspace/PRODUCTION/GitConfigCodePull_NewRepo/CICD-BackendScripts/SPOMS_Scripts/PROD/OMSApp/Pipeline/new_omsapp_s3_upload_newrepo.sh $ENVIRONMENT $ZIP_FILE_OMS $S3_ARTIFACTS_BUCKET
+                    '''
+                    */
+                    sh "/ciapp/CICD-Scripts/CICD-BackendScripts/new_omsapp_s3_upload_prod_new.sh $ENVIRONMENT ${env.ZIP_FILE_OMS} ${env.S3_ARTIFACTS_BUCKET}"
+
+                }
+		    }
+          
+          stage('Deploying New Omsapp WebApp War'){
+                  steps{
+                       build job: "PRODUCTION/CodeDeploy_PROD", parameters: [string(name: "TARGET_DEPLOYMENT_APP", value: "${env.TARGET_DEPLOYMENT_APP}"), string(name: "TARGET_DEPLOYMENT_GROUP", value: "${env.TARGET_DEPLOYMENT_GROUP_OMS}"), string(name: "TARGET_DEPLOYMENT_CONFIG", value: "CodeDeployDefault.OneAtATime"), string(name: "TARGET_DEPLOYMENT_S3_BUCKET", value: "${env.TARGET_DEPLOYMENT_S3_BUCKET}"), string(name: "ZIP_FILE_NAME", value: "${env.ZIP_FILE_OMS}"), string(name: "S3_ARTIFACTS_BUCKET", value: "${env.S3_ARTIFACTS_BUCKET}"), string(name: "ENVIRONMENT", value: "$ENVIRONMENT"), string(name: "TARGET_DEPLOYMENT_BUCKET_SUFFIX", value: "${params.ENVIRONMENT}"), string(name: "BRANCH_NAME", value: "${env.BRANCH_NAME}"), string(name: "JOB_BUILD_NO", value: "${env.JOB_BUILD_NO}"), string(name: "COMMIT_ID", value: "${params.COMMIT_ID}"), string(name: "BRANCH_TAG_NAME", value: "${params.BRANCH_TAG_NAME}")]
+                  }
+               } 
+	     stage('Clean Work Space') {
+                steps{
+                 cleanWs()
+                }
+            } 
+           
+   }
+   
+}
